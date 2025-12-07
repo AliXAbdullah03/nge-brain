@@ -12,7 +12,7 @@ const orderItemSchema = new mongoose.Schema({
   },
   price: {
     type: Number,
-    required: true,
+    required: false,
     min: 0
   }
 });
@@ -32,12 +32,15 @@ const orderSchema = new mongoose.Schema({
   branchId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Branch',
-    required: true
+    required: false
+  },
+  departureDate: {
+    type: Date
   },
   items: [orderItemSchema],
   totalAmount: {
     type: Number,
-    required: true,
+    required: false,
     min: 0
   },
   currency: {
@@ -47,7 +50,7 @@ const orderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'completed', 'cancelled'],
+    enum: ['pending', 'processing', 'confirmed', 'in_transit', 'delivered', 'completed', 'cancelled'],
     default: 'pending'
   },
   paymentStatus: {

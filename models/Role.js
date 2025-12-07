@@ -5,12 +5,17 @@ const roleSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    trim: true
+    trim: true,
+    enum: ['Driver', 'Super Admin', 'Admin', 'Hub Receiver']
   },
   description: {
     type: String
   },
+  // Support both string array and ObjectId array for backward compatibility
   permissions: [{
+    type: String
+  }],
+  permissionIds: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Permission'
   }]

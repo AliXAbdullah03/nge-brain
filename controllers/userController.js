@@ -1,5 +1,7 @@
 const bcrypt = require('bcrypt');
 const User = require('../models/User');
+const Role = require('../models/Role');
+const { getStandardizedRoleName, isValidRoleName } = require('../utils/roleMapper');
 
 const getUsers = async (req, res, next) => {
   try {
@@ -31,6 +33,13 @@ const getUsers = async (req, res, next) => {
       .skip(skip)
       .limit(limit);
     
+    // Standardize role names in response
+    users.forEach(user => {
+      if (user.roleId) {
+        user.roleId.name = getStandardizedRoleName(user.roleId.name);
+      }
+    });
+    
     const total = await User.countDocuments(query);
     
     res.json({
@@ -55,8 +64,8 @@ const getUsers = async (req, res, next) => {
 const getUserById = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id)
-      .populate('roleId')
-      .populate('branchId')
+      .populate('roleId', 'name')
+      .populate('branchId', 'name')
       .select('-passwordHash');
     
     if (!user) {
@@ -67,6 +76,11 @@ const getUserById = async (req, res, next) => {
           message: 'User not found'
         }
       });
+    }
+    
+    // Standardize role name in response
+    if (user.roleId) {
+      user.roleId.name = getStandardizedRoleName(user.roleId.name);
     }
     
     res.json({
@@ -80,7 +94,47 @@ const getUserById = async (req, res, next) => {
 
 const createUser = async (req, res, next) => {
   try {
-    const { password, ...userData } = req.body;
+    const { password, roleId, branchId, ...userData } = req.body;
+    
+    // Validate roleId exists
+    if (!roleId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'roleId is required'
+        }
+      });
+    }
+    
+    const role = await Role.findById(roleId);
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid roleId. Role not found'
+        }
+      });
+    }
+    
+    // Validate and standardize role name
+    const standardizedRoleName = getStandardizedRoleName(role.name);
+    if (!isValidRoleName(standardizedRoleName)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid role. Must be one of: Driver, Super Admin, Admin, Hub Receiver'
+        }
+      });
+    }
+    
+    // Update role name if it was mapped
+    if (role.name !== standardizedRoleName) {
+      role.name = standardizedRoleName;
+      await role.save();
+    }
     
     // Hash password
     const saltRounds = 10;
@@ -89,33 +143,93 @@ const createUser = async (req, res, next) => {
     const user = new User({
       ...userData,
       email: userData.email.toLowerCase(),
-      passwordHash
+      passwordHash,
+      roleId,
+      branchId: branchId || null
     });
     
     await user.save();
     
     const userResponse = await User.findById(user._id)
-      .populate('roleId')
-      .populate('branchId')
+      .populate('roleId', 'name')
+      .populate('branchId', 'name')
       .select('-passwordHash');
+    
+    // Standardize role name in response
+    if (userResponse.roleId) {
+      userResponse.roleId.name = getStandardizedRoleName(userResponse.roleId.name);
+    }
     
     res.status(201).json({
       success: true,
-      data: { user: userResponse },
-      message: 'User created successfully'
+      data: { user: userResponse }
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: 'A user with this email already exists'
+        }
+      });
+    }
     next(error);
   }
 };
 
 const updateUser = async (req, res, next) => {
   try {
-    const updateData = { ...req.body };
+    const { password, roleId, branchId, ...updateData } = req.body;
     
-    // Don't allow password update through this endpoint
-    delete updateData.password;
-    delete updateData.passwordHash;
+    // Handle password update if provided
+    if (password) {
+      const saltRounds = 10;
+      updateData.passwordHash = await bcrypt.hash(password, saltRounds);
+    }
+    
+    // Validate roleId if provided
+    if (roleId !== undefined) {
+      if (roleId === null || roleId === '') {
+        updateData.roleId = null;
+      } else {
+        const role = await Role.findById(roleId);
+        if (!role) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid roleId. Role not found'
+            }
+          });
+        }
+        
+        // Validate and standardize role name
+        const standardizedRoleName = getStandardizedRoleName(role.name);
+        if (!isValidRoleName(standardizedRoleName)) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid role. Must be one of: Driver, Super Admin, Admin, Hub Receiver'
+            }
+          });
+        }
+        
+        // Update role name if it was mapped
+        if (role.name !== standardizedRoleName) {
+          role.name = standardizedRoleName;
+          await role.save();
+        }
+        
+        updateData.roleId = roleId;
+      }
+    }
+    
+    // Handle branchId
+    if (branchId !== undefined) {
+      updateData.branchId = branchId || null;
+    }
     
     if (updateData.email) {
       updateData.email = updateData.email.toLowerCase();
@@ -126,8 +240,8 @@ const updateUser = async (req, res, next) => {
       updateData,
       { new: true, runValidators: true }
     )
-      .populate('roleId')
-      .populate('branchId')
+      .populate('roleId', 'name')
+      .populate('branchId', 'name')
       .select('-passwordHash');
     
     if (!user) {
@@ -140,12 +254,25 @@ const updateUser = async (req, res, next) => {
       });
     }
     
+    // Standardize role name in response
+    if (user.roleId) {
+      user.roleId.name = getStandardizedRoleName(user.roleId.name);
+    }
+    
     res.json({
       success: true,
-      data: { user },
-      message: 'User updated successfully'
+      data: { user }
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: 'A user with this email already exists'
+        }
+      });
+    }
     next(error);
   }
 };

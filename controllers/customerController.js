@@ -138,15 +138,11 @@ const updateCustomer = async (req, res, next) => {
 };
 
 /**
- * Delete customer (soft delete by setting status to inactive)
+ * Delete customer
  */
 const deleteCustomer = async (req, res, next) => {
   try {
-    const customer = await Customer.findByIdAndUpdate(
-      req.params.id,
-      { status: 'inactive' },
-      { new: true }
-    );
+    const customer = await Customer.findByIdAndDelete(req.params.id);
     
     if (!customer) {
       return res.status(404).json({

@@ -1,67 +1,160 @@
 const Role = require('../models/Role');
 const Permission = require('../models/Permission');
+const { getStandardizedRoleName } = require('../utils/roleMapper');
+const { validatePermissions } = require('../utils/permissionValidator');
 
+/**
+ * Get all roles with their permissions
+ */
 const getRoles = async (req, res, next) => {
   try {
-    const roles = await Role.find().populate('permissions').sort({ createdAt: -1 });
+    const roles = await Role.find().sort({ createdAt: -1 });
+    
+    // Standardize role names and ensure permissions are strings
+    const standardizedRoles = roles.map(role => {
+      const roleObj = role.toObject();
+      // Use permissions array (string array) if available, otherwise empty
+      roleObj.permissions = roleObj.permissions || [];
+      // Standardize role name
+      roleObj.name = getStandardizedRoleName(roleObj.name);
+      return roleObj;
+    });
     
     res.json({
       success: true,
-      data: { roles }
+      data: { roles: standardizedRoles }
     });
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * Get role by ID
+ */
 const getRoleById = async (req, res, next) => {
   try {
-    const role = await Role.findById(req.params.id).populate('permissions');
+    const role = await Role.findById(req.params.id);
     
     if (!role) {
       return res.status(404).json({
         success: false,
         error: {
-          code: 'NOT_FOUND',
+          code: 'ROLE_NOT_FOUND',
           message: 'Role not found'
         }
       });
     }
     
+    const roleObj = role.toObject();
+    roleObj.permissions = roleObj.permissions || [];
+    roleObj.name = getStandardizedRoleName(roleObj.name);
+    
     res.json({
       success: true,
-      data: { role }
+      data: roleObj
     });
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * Create new role
+ */
 const createRole = async (req, res, next) => {
   try {
-    const { permissionIds, ...roleData } = req.body;
+    const { name, description, permissions, permissionIds } = req.body;
     
-    const role = new Role(roleData);
-    if (permissionIds && Array.isArray(permissionIds)) {
-      role.permissions = permissionIds;
+    // Validate and standardize role name
+    const standardizedName = getStandardizedRoleName(name);
+    if (!standardizedName || !['Driver', 'Super Admin', 'Admin', 'Hub Receiver'].includes(standardizedName)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid role name. Must be one of: Driver, Super Admin, Admin, Hub Receiver'
+        }
+      });
     }
     
+    // Validate permissions if provided
+    if (permissions) {
+      const validation = validatePermissions(permissions);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: `Invalid permission: '${validation.invalid[0]}'`
+          }
+        });
+      }
+    }
+    
+    const roleData = {
+      name: standardizedName,
+      description,
+      permissions: permissions || []
+    };
+    
+    // Support backward compatibility with permissionIds
+    if (permissionIds && Array.isArray(permissionIds)) {
+      roleData.permissionIds = permissionIds;
+    }
+    
+    const role = new Role(roleData);
     await role.save();
-    await role.populate('permissions');
+    
+    const roleObj = role.toObject();
+    roleObj.permissions = roleObj.permissions || [];
     
     res.status(201).json({
       success: true,
-      data: { role },
-      message: 'Role created successfully'
+      data: roleObj
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Role with this name already exists'
+        }
+      });
+    }
     next(error);
   }
 };
 
+/**
+ * Update role permissions
+ */
 const updateRole = async (req, res, next) => {
   try {
-    const { permissionIds, ...roleData } = req.body;
+    const { permissions } = req.body;
+    
+    if (!permissions) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'permissions array is required'
+        }
+      });
+    }
+    
+    // Validate permissions
+    const validation = validatePermissions(permissions);
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: `Invalid permission: '${validation.invalid[0]}'`
+        }
+      });
+    }
     
     const role = await Role.findById(req.params.id);
     
@@ -69,24 +162,24 @@ const updateRole = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         error: {
-          code: 'NOT_FOUND',
+          code: 'ROLE_NOT_FOUND',
           message: 'Role not found'
         }
       });
     }
     
-    Object.assign(role, roleData);
-    if (permissionIds && Array.isArray(permissionIds)) {
-      role.permissions = permissionIds;
-    }
-    
+    // Update permissions
+    role.permissions = permissions;
     await role.save();
-    await role.populate('permissions');
+    
+    const roleObj = role.toObject();
+    roleObj.permissions = roleObj.permissions || [];
+    roleObj.name = getStandardizedRoleName(roleObj.name);
     
     res.json({
       success: true,
-      data: { role },
-      message: 'Role updated successfully'
+      data: roleObj,
+      message: 'Role permissions updated successfully'
     });
   } catch (error) {
     next(error);
@@ -101,7 +194,7 @@ const deleteRole = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         error: {
-          code: 'NOT_FOUND',
+          code: 'ROLE_NOT_FOUND',
           message: 'Role not found'
         }
       });

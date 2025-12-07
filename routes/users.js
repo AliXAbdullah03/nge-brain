@@ -12,13 +12,13 @@ const {
 const { authenticate } = require('../middleware/auth');
 const { authorize } = require('../middleware/auth');
 
-router.get('/', authenticate, authorize('users_read'), getUsers);
-router.get('/:id', authenticate, authorize('users_read'), getUserById);
-router.post('/', authenticate, authorize('users_create'), createUser);
-router.put('/:id', authenticate, authorize('users_update'), updateUser);
-router.put('/:id/password', authenticate, authorize('users_update'), updateUserPassword);
-router.put('/:id/status', authenticate, authorize('users_update'), updateUserStatus);
-router.delete('/:id', authenticate, authorize('users_delete'), deleteUser);
+router.get('/', authenticate, authorize('user:view'), getUsers);
+router.get('/:id', authenticate, authorize('user:view'), getUserById);
+router.post('/', authenticate, authorize('user:create'), createUser);
+router.put('/:id', authenticate, authorize('user:modify'), updateUser);
+router.put('/:id/password', authenticate, authorize('user:modify'), updateUserPassword);
+router.put('/:id/status', authenticate, authorize('user:modify'), updateUserStatus);
+router.delete('/:id', authenticate, authorize('user:delete'), deleteUser);
 
 module.exports = router;
 

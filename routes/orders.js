@@ -13,22 +13,22 @@ const { authorize } = require('../middleware/auth');
 const { validateOrder } = require('../middleware/validator');
 
 // GET /api/orders
-router.get('/', authenticate, authorize('orders_read'), getOrders);
+router.get('/', authenticate, authorize('order:view'), getOrders);
 
 // GET /api/orders/:id
-router.get('/:id', authenticate, authorize('orders_read'), getOrderById);
+router.get('/:id', authenticate, authorize('order:view'), getOrderById);
 
 // POST /api/orders
-router.post('/', authenticate, authorize('orders_create'), validateOrder, createOrder);
+router.post('/', authenticate, authorize('order:create'), validateOrder, createOrder);
 
 // PUT /api/orders/:id
-router.put('/:id', authenticate, authorize('orders_update'), updateOrder);
+router.put('/:id', authenticate, authorize('order:modify'), updateOrder);
 
 // PUT /api/orders/:id/status
-router.put('/:id/status', authenticate, authorize('orders_update'), updateOrderStatus);
+router.put('/:id/status', authenticate, authorize('order:modify'), updateOrderStatus);
 
 // DELETE /api/orders/:id
-router.delete('/:id', authenticate, authorize('orders_delete'), deleteOrder);
+router.delete('/:id', authenticate, authorize('order:delete'), deleteOrder);
 
 module.exports = router;
 

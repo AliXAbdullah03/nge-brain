@@ -1,4 +1,5 @@
 const Shipment = require('../models/Shipment');
+const Order = require('../models/Order');
 const { generateTrackingId, generateBatchNumber } = require('../utils/generateIds');
 
 /**
@@ -434,11 +435,131 @@ const updateBatchStatus = async (req, res, next) => {
   }
 };
 
+/**
+ * Create shipments from multiple orders
+ */
+const createShipmentsFromOrders = async (req, res, next) => {
+  try {
+    const { orderIds, departureDate } = req.body;
+    
+    // Validate input
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'orderIds must be a non-empty array'
+        }
+      });
+    }
+    
+    if (!departureDate) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'departureDate is required'
+        }
+      });
+    }
+    
+    // Fetch all orders
+    const orders = await Order.find({ _id: { $in: orderIds } })
+      .populate('customerId', 'firstName lastName email phone address city country');
+    
+    if (orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'No orders found with the provided IDs'
+        }
+      });
+    }
+    
+    if (orders.length !== orderIds.length) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Some order IDs were not found'
+        }
+      });
+    }
+    
+    // Generate a batch number for all shipments
+    const batchNumber = await generateBatchNumber();
+    const createdShipments = [];
+    
+    // Create a shipment for each order
+    for (const order of orders) {
+      const trackingId = await generateTrackingId();
+      
+      // Convert order items to parcels
+      const parcels = order.items.map(item => ({
+        itemsDescription: item.description,
+        weight: 0, // Default weight, can be updated later
+        weightUnit: 'kg',
+        value: item.price || 0
+      }));
+      
+      // Calculate total weight (if available in items, otherwise 0)
+      const totalWeight = parcels.reduce((sum, parcel) => sum + (parcel.weight || 0), 0);
+      
+      // Create shipment
+      const shipmentData = {
+        trackingId,
+        orderId: order._id,
+        shipperId: order.customerId._id,
+        receiverId: order.customerId._id, // Assuming same customer, can be updated if needed
+        batchNumber,
+        departureDate: new Date(departureDate),
+        originBranchId: order.branchId || null,
+        destinationBranchId: null, // Can be set later
+        parcels,
+        totalWeight,
+        weightUnit: 'kg',
+        shippingCost: order.totalAmount || 0,
+        insuranceAmount: 0,
+        createdBy: req.user._id,
+        history: [{
+          status: 'Processing',
+          location: order.branchId ? 'Origin Facility' : 'Processing Center',
+          notes: `Shipment created from order ${order.orderNumber}`,
+          date: new Date(),
+          createdBy: req.user._id
+        }]
+      };
+      
+      const shipment = new Shipment(shipmentData);
+      await shipment.save();
+      
+      // Populate the shipment
+      await shipment.populate('shipperId receiverId originBranchId destinationBranchId orderId createdBy');
+      
+      createdShipments.push(shipment);
+    }
+    
+    res.status(201).json({
+      success: true,
+      data: {
+        shipments: createdShipments,
+        batchNumber,
+        count: createdShipments.length
+      },
+      message: `Successfully created ${createdShipments.length} shipment(s) from orders`
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getShipments,
   getShipmentById,
   trackShipment,
   createShipment,
+  createShipmentsFromOrders,
   updateShipment,
   updateShipmentStatus,
   deleteShipment,

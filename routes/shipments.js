@@ -5,6 +5,7 @@ const {
   getShipmentById,
   trackShipment,
   createShipment,
+  createShipmentsFromOrders,
   updateShipment,
   updateShipmentStatus,
   deleteShipment,
@@ -20,31 +21,34 @@ const { validateShipment, validateShipmentStatus, validateBulkShipmentStatus } =
 router.get('/track/:trackingId', trackShipment);
 
 // GET /api/shipments
-router.get('/', authenticate, authorize('shipments_read'), getShipments);
+router.get('/', authenticate, authorize('shipment:view'), getShipments);
 
 // POST /api/shipments
-router.post('/', authenticate, authorize('shipments_create'), validateShipment, createShipment);
+router.post('/', authenticate, authorize('shipment:view'), validateShipment, createShipment);
+
+// POST /api/shipments/create-from-orders (must come before /:id routes)
+router.post('/create-from-orders', authenticate, authorize('shipment:view'), createShipmentsFromOrders);
 
 // PUT /api/shipments/bulk/status (must come before /:id routes)
-router.put('/bulk/status', authenticate, authorize('shipments_update'), validateBulkShipmentStatus, updateBulkStatus);
+router.put('/bulk/status', authenticate, authorize('shipment:bulk_update'), validateBulkShipmentStatus, updateBulkStatus);
 
 // POST /api/shipments/:id/status
-router.post('/:id/status', authenticate, authorize('shipments_update'), validateShipmentStatus, updateShipmentStatus);
+router.post('/:id/status', authenticate, authorize('shipment:status_update'), validateShipmentStatus, updateShipmentStatus);
 
 // GET /api/shipments/:id
-router.get('/:id', authenticate, authorize('shipments_read'), getShipmentById);
+router.get('/:id', authenticate, authorize('shipment:view'), getShipmentById);
 
 // PUT /api/shipments/:id
-router.put('/:id', authenticate, authorize('shipments_update'), updateShipment);
+router.put('/:id', authenticate, authorize('shipment:view'), updateShipment);
 
 // DELETE /api/shipments/:id
-router.delete('/:id', authenticate, authorize('shipments_delete'), deleteShipment);
+router.delete('/:id', authenticate, authorize('shipment:view'), deleteShipment);
 
 // GET /api/shipments/batch/:batchNumber
-router.get('/batch/:batchNumber', authenticate, authorize('shipments_read'), getShipmentsByBatch);
+router.get('/batch/:batchNumber', authenticate, authorize('shipment:view'), getShipmentsByBatch);
 
 // PUT /api/shipments/batch/:batchNumber/status
-router.put('/batch/:batchNumber/status', authenticate, authorize('shipments_update'), validateShipmentStatus, updateBatchStatus);
+router.put('/batch/:batchNumber/status', authenticate, authorize('shipment:status_update'), validateShipmentStatus, updateBatchStatus);
 
 module.exports = router;
 

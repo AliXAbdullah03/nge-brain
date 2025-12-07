@@ -17,14 +17,24 @@ const errorHandler = (err, req, res, next) => {
     });
   }
   
-  // Mongoose duplicate key error
+  // Mongoose/MongoDB duplicate key error
   if (err.code === 11000) {
-    const field = Object.keys(err.keyPattern)[0];
+    const field = Object.keys(err.keyPattern || {})[0] || 'field';
+    const value = err.keyValue ? err.keyValue[field] : 'value';
+    
+    // Provide more specific messages for common fields
+    let message = `${field} already exists`;
+    if (field === 'email') {
+      message = `A customer with email "${value}" already exists`;
+    } else if (field === 'phone') {
+      message = `A customer with phone "${value}" already exists`;
+    }
+    
     return res.status(409).json({
       success: false,
       error: {
         code: 'DUPLICATE_ENTRY',
-        message: `${field} already exists`
+        message: message
       }
     });
   }

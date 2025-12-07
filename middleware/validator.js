@@ -40,15 +40,29 @@ const validateCustomer = [
 
 /**
  * Order validation
+ * customerId is optional if customer details are provided
  */
 const validateOrder = [
-  body('customerId').notEmpty().withMessage('Customer ID is required'),
-  body('branchId').notEmpty().withMessage('Branch ID is required'),
+  body('customerId').optional(),
+  body('branchId').optional(),
   body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
   body('items.*.description').notEmpty().withMessage('Item description is required'),
   body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1'),
-  body('items.*.price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
-  body('totalAmount').isFloat({ min: 0 }).withMessage('Total amount must be a positive number'),
+  body('items.*.price').optional().isFloat({ min: 0 }).withMessage('Price must be a positive number'),
+  body('totalAmount').optional().isFloat({ min: 0 }).withMessage('Total amount must be a positive number'),
+  body('departureDate').optional().isISO8601().withMessage('Departure date must be a valid ISO 8601 date'),
+  // Customer details validation (if customerId is not provided)
+  body('firstName').optional().trim(),
+  body('lastName').optional().trim(),
+  body('phone').optional().trim(),
+  body('email').optional().isEmail().normalizeEmail(),
+  // Custom validation: if customerId is not provided, firstName, lastName, and phone are required
+  body('customerId').custom((value, { req }) => {
+    if (!value && (!req.body.firstName || !req.body.lastName || !req.body.phone)) {
+      throw new Error('Either customerId or customer details (firstName, lastName, phone) are required');
+    }
+    return true;
+  }),
   handleValidationErrors
 ];
 

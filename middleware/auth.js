@@ -81,7 +81,7 @@ const authorize = (...requiredPermissions) => {
       }
       
       // Get user permissions
-      const role = await Role.findById(req.user.roleId).populate('permissions');
+      const role = await Role.findById(req.user.roleId);
       if (!role) {
         return res.status(403).json({
           success: false,
@@ -92,7 +92,22 @@ const authorize = (...requiredPermissions) => {
         });
       }
       
-      const userPermissions = role.permissions.map(p => p.name);
+      // Support both string array and ObjectId array (backward compatibility)
+      let userPermissions = [];
+      if (role.permissions && role.permissions.length > 0) {
+        // If permissions is string array, use it directly
+        if (typeof role.permissions[0] === 'string') {
+          userPermissions = role.permissions;
+        } else {
+          // If it's ObjectId array, populate and get names
+          await role.populate('permissions');
+          userPermissions = role.permissions.map(p => p.name);
+        }
+      } else if (role.permissionIds && role.permissionIds.length > 0) {
+        // Fallback to permissionIds for backward compatibility
+        await role.populate('permissionIds');
+        userPermissions = role.permissionIds.map(p => p.name);
+      }
       
       // Check if user has at least one required permission
       const hasPermission = requiredPermissions.some(permission => 
