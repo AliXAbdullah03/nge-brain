@@ -96,6 +96,16 @@ app.use('/api/hubs', hubRoutes);
 app.use('/api/admin/hubs', adminHubRoutes);
 app.use('/api/admin/settings', settingsRoutes);
 
+// Root endpoint (for health checks)
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'NGEBASE API Server is running',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
