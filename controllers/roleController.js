@@ -1,7 +1,7 @@
 const Role = require('../models/Role');
 const Permission = require('../models/Permission');
 const { getStandardizedRoleName } = require('../utils/roleMapper');
-const { validatePermissions } = require('../utils/permissionValidator');
+const { validatePermissions, VALID_PERMISSIONS } = require('../utils/permissionValidator');
 
 /**
  * Get all roles with their permissions
@@ -10,15 +10,18 @@ const getRoles = async (req, res, next) => {
   try {
     const roles = await Role.find().sort({ createdAt: -1 });
     
-    // Standardize role names and ensure permissions are strings
-    const standardizedRoles = roles.map(role => {
+    // Standardize role names, filter allowed permissions, and de-duplicate by name
+    const seen = new Set();
+    const standardizedRoles = roles.reduce((acc, role) => {
       const roleObj = role.toObject();
-      // Use permissions array (string array) if available, otherwise empty
-      roleObj.permissions = roleObj.permissions || [];
-      // Standardize role name
+      roleObj.permissions = (roleObj.permissions || []).filter(p => VALID_PERMISSIONS.has(p));
       roleObj.name = getStandardizedRoleName(roleObj.name);
-      return roleObj;
-    });
+      const key = roleObj.name.toLowerCase().trim();
+      if (seen.has(key)) return acc;
+      seen.add(key);
+      acc.push(roleObj);
+      return acc;
+    }, []);
     
     res.json({
       success: true,
@@ -107,7 +110,7 @@ const createRole = async (req, res, next) => {
     await role.save();
     
     const roleObj = role.toObject();
-    roleObj.permissions = roleObj.permissions || [];
+    roleObj.permissions = (roleObj.permissions || []).filter(p => VALID_PERMISSIONS.has(p));
     
     res.status(201).json({
       success: true,
@@ -168,12 +171,54 @@ const updateRole = async (req, res, next) => {
       });
     }
     
-    // Update permissions
-    role.permissions = permissions;
-    await role.save();
+    // Filter permissions to only allowed ones
+    const filteredPermissions = permissions.filter(p => VALID_PERMISSIONS.has(p));
     
-    const roleObj = role.toObject();
-    roleObj.permissions = roleObj.permissions || [];
+    // Normalize existing role name to pass enum validation, but avoid duplicates
+    // If normalizing would cause a duplicate, skip name update (permissions still update)
+    const standardizedName = getStandardizedRoleName(role.name);
+    if (!standardizedName) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid role name'
+        }
+      });
+    }
+    
+    // Prepare update object - only update permissions, conditionally update name
+    const updateData = { permissions: filteredPermissions };
+    
+    // Only update name if it's different AND won't cause a duplicate
+    if (standardizedName !== role.name) {
+      const conflict = await Role.findOne({ name: standardizedName, _id: { $ne: role._id } });
+      if (!conflict) {
+        // Safe to update name - no conflict
+        updateData.name = standardizedName;
+      }
+      // If conflict exists, skip name update but continue with permissions update
+    }
+
+    // Use findByIdAndUpdate to only update specified fields, avoiding full document validation
+    const updatedRole = await Role.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateData },
+      { new: true, runValidators: false }
+    );
+    
+    if (!updatedRole) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'ROLE_NOT_FOUND',
+          message: 'Role not found'
+        }
+      });
+    }
+    
+    const roleObj = updatedRole.toObject();
+    roleObj.permissions = (roleObj.permissions || []).filter(p => VALID_PERMISSIONS.has(p));
     roleObj.name = getStandardizedRoleName(roleObj.name);
     
     res.json({

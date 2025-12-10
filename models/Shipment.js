@@ -71,6 +71,10 @@ const shipmentSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  orderIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order'
+  }],
   batchNumber: {
     type: String,
     trim: true
@@ -83,7 +87,17 @@ const shipmentSchema = new mongoose.Schema({
   },
   currentStatus: {
     type: String,
-    enum: ['Processing', 'In Transit', 'Out for Delivery', 'Delivered', 'On Hold'],
+    enum: [
+      'Pending',
+      'Processing',
+      'Confirmed',
+      'In Transit',
+      'Out for Delivery',
+      'Delivered',
+      'Completed',
+      'Cancelled',
+      'On Hold'
+    ],
     default: 'Processing'
   },
   originBranchId: {

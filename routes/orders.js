@@ -6,11 +6,15 @@ const {
   createOrder,
   updateOrder,
   updateOrderStatus,
-  deleteOrder
+  deleteOrder,
+  trackOrderOrShipment
 } = require('../controllers/orderController');
 const { authenticate } = require('../middleware/auth');
 const { authorize } = require('../middleware/auth');
 const { validateOrder } = require('../middleware/validator');
+
+// GET /api/orders/track/:identifier (PUBLIC - no authentication required)
+router.get('/track/:identifier', trackOrderOrShipment);
 
 // GET /api/orders
 router.get('/', authenticate, authorize('order:view'), getOrders);

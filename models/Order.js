@@ -48,9 +48,17 @@ const orderSchema = new mongoose.Schema({
     default: 'USD',
     uppercase: true
   },
+  shipmentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shipment'
+  },
+  batchNumber: {
+    type: String,
+    trim: true
+  },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'confirmed', 'in_transit', 'delivered', 'completed', 'cancelled'],
+    enum: ['pending', 'processing', 'confirmed', 'in_transit', 'out_for_delivery', 'delivered', 'completed', 'cancelled'],
     default: 'pending'
   },
   paymentStatus: {

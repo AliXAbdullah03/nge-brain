@@ -2,12 +2,23 @@
  * Permission validation utility
  */
 
-const VALID_RESOURCES = ['order', 'shipment', 'user', 'frontend', 'settings'];
-const VALID_ACTIONS = [
-  'create', 'modify', 'delete', 'view', 
-  'status_update', 'bulk_update', 'edit', 
-  'reviews', 'modify'
-];
+// Canonical permission list used by frontend/backend
+const VALID_PERMISSIONS = new Set([
+  'order:create',
+  'order:modify',
+  'order:delete',
+  'order:view',
+  'shipment:status_update',
+  'shipment:bulk_update',
+  'shipment:view',
+  'user:create',
+  'user:modify',
+  'user:delete',
+  'user:view',
+  'frontend:edit',
+  'frontend:reviews',
+  'settings:modify'
+]);
 
 /**
  * Validate permission string format
@@ -16,12 +27,7 @@ const VALID_ACTIONS = [
  */
 const isValidPermission = (permission) => {
   if (typeof permission !== 'string') return false;
-  
-  const parts = permission.split(':');
-  if (parts.length !== 2) return false;
-  
-  const [resource, action] = parts;
-  return VALID_RESOURCES.includes(resource) && VALID_ACTIONS.includes(action);
+  return VALID_PERMISSIONS.has(permission);
 };
 
 /**
@@ -45,7 +51,6 @@ const validatePermissions = (permissions) => {
 module.exports = {
   isValidPermission,
   validatePermissions,
-  VALID_RESOURCES,
-  VALID_ACTIONS
+  VALID_PERMISSIONS
 };
 

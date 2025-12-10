@@ -109,9 +109,19 @@ const authorize = (...requiredPermissions) => {
         userPermissions = role.permissionIds.map(p => p.name);
       }
       
-      // Check if user has at least one required permission
-      const hasPermission = requiredPermissions.some(permission => 
-        userPermissions.includes(permission)
+      const normalizePerm = (p) => (p || '').toString().toLowerCase().replace(/[:\s]+/g, '_');
+      const normalizedUserPerms = userPermissions.map(normalizePerm);
+
+      // Driver allowances: let Driver pass specific endpoints even if explicit permission missing
+      const normalizedRequired = requiredPermissions.map(normalizePerm);
+      if (role.name === 'Driver') {
+        const driverAllowed = ['order_view', 'shipment_view', 'shipment_status_update', 'shipment_bulk_update'];
+        const intersects = normalizedRequired.some(r => driverAllowed.includes(r));
+        if (intersects) return next();
+      }
+
+      const hasPermission = normalizedRequired.some(permission => 
+        normalizedUserPerms.includes(permission)
       );
       
       if (!hasPermission) {
