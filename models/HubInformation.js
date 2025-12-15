@@ -6,25 +6,52 @@ const hubInformationSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  code: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
   address: {
     type: String,
     required: true
   },
   email: {
     type: String,
-    lowercase: true
+    required: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address']
   },
-  phone: {
-    type: String
+  mobile: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  operatingDays: {
+    type: String,
+    trim: true
   },
   operatingTime: {
-    type: String // "9 AM - 6 PM"
+    type: String, // "9 AM - 6 PM"
+    trim: true
   },
   timeZone: {
-    type: String // "UAE Time Zone (GMT+4)"
+    type: String, // "UAE Time Zone"
+    trim: true
   },
-  mapUrl: {
-    type: String
+  timeZoneOffset: {
+    type: String, // "GMT+4"
+    trim: true
+  },
+  mapEmbedUrl: {
+    type: String,
+    trim: true
+  },
+  description: {
+    type: String,
+    trim: true
   },
   isActive: {
     type: Boolean,
@@ -38,6 +65,7 @@ const hubInformationSchema = new mongoose.Schema({
   timestamps: true
 });
 
+hubInformationSchema.index({ code: 1 });
 hubInformationSchema.index({ isActive: 1, displayOrder: 1 });
 
 module.exports = mongoose.model('HubInformation', hubInformationSchema);

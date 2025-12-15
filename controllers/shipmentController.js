@@ -197,8 +197,9 @@ const createShipment = async (req, res, next) => {
       shippingCost: req.body.shippingCost || 0,
       insuranceAmount: req.body.insuranceAmount || 0,
       createdBy: req.user._id,
+      currentStatus: 'Shipment Received',
       history: [{
-        status: 'Processing',
+        status: 'Shipment Received',
         location: req.body.originBranchId ? 'Origin Facility' : 'Processing Center',
         notes: 'Shipment created',
         date: new Date(),
@@ -226,58 +227,17 @@ const createShipment = async (req, res, next) => {
  */
 const normalizeShipmentStatus = (status) => {
   if (!status) return undefined;
-  const normalized = status.toLowerCase().replace(/\s+/g, '_');
-  switch (normalized) {
-    case 'pending':
-      return 'Pending';
-    case 'processing':
-      return 'Processing';
-    case 'in_transit':
-      return 'In Transit';
-    case 'out_for_delivery':
-      return 'Out for Delivery';
-    case 'delivered':
-      return 'Delivered';
-    case 'completed':
-      return 'Completed';
-    case 'cancelled':
-    case 'canceled':
-      return 'Cancelled';
-    case 'on_hold':
-      return 'On Hold';
-    case 'confirmed':
-      return 'Confirmed';
-    default:
-      return 'Processing';
-  }
+  // Use the status normalizer utility
+  const { normalizeStatus, toDatabaseStatus } = require('../utils/statusNormalizer');
+  const normalized = normalizeStatus(status);
+  const dbStatus = toDatabaseStatus(normalized);
+  return dbStatus || undefined;
 };
 
+// Shipment status maps directly to order status (same values)
 const mapShipmentStatusToOrderStatus = (status) => {
-  if (!status) return undefined;
-  const normalized = status.toLowerCase().replace(/\s+/g, '_');
-  switch (normalized) {
-    case 'pending':
-      return 'pending';
-    case 'processing':
-      return 'processing';
-    case 'in_transit':
-      return 'in_transit';
-    case 'out_for_delivery':
-      return 'in_transit';
-    case 'delivered':
-      return 'delivered';
-    case 'completed':
-      return 'completed';
-    case 'cancelled':
-    case 'canceled':
-      return 'cancelled';
-    case 'on_hold':
-      return 'pending';
-    case 'confirmed':
-      return 'confirmed';
-    default:
-      return 'processing';
-  }
+  // Both use the same status sequence now
+  return normalizeShipmentStatus(status);
 };
 
 const updateShipment = async (req, res, next) => {
@@ -330,8 +290,35 @@ const updateShipment = async (req, res, next) => {
       });
     }
 
-    // If status updated, propagate to related orders
-    if (status) {
+    // If status updated, propagate to ALL orders in the batch (by departureDate or batchNumber)
+    if (status && normalizedStatus) {
+      const orderStatus = mapShipmentStatusToOrderStatus(status);
+      
+      // Find all orders in this batch by batchNumber
+      if (shipment.batchNumber) {
+        await Order.updateMany(
+          { batchNumber: shipment.batchNumber },
+          { $set: { status: orderStatus } }
+        );
+      }
+      
+      // Also update by departureDate if available (for orders with same departureDate)
+      if (shipment.departureDate) {
+        const dayStart = new Date(shipment.departureDate);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+        
+        await Order.updateMany(
+          { 
+            departureDate: { $gte: dayStart, $lt: dayEnd },
+            batchNumber: shipment.batchNumber || { $exists: false }
+          },
+          { $set: { status: orderStatus } }
+        );
+      }
+      
+      // Also update direct order references
       const orderIds = [];
       if (shipment.orderId) orderIds.push(shipment.orderId);
       if (Array.isArray(shipment.orderIds) && shipment.orderIds.length) {
@@ -339,7 +326,6 @@ const updateShipment = async (req, res, next) => {
       }
 
       if (orderIds.length) {
-        const orderStatus = mapShipmentStatusToOrderStatus(status);
         await Order.updateMany(
           { _id: { $in: orderIds } },
           { $set: { status: orderStatus } }
@@ -349,7 +335,7 @@ const updateShipment = async (req, res, next) => {
     
     res.json({
       success: true,
-      data: { shipment },
+      data: shipment,
       message: 'Shipment updated successfully'
     });
   } catch (error) {
@@ -363,11 +349,27 @@ const updateShipment = async (req, res, next) => {
 const updateShipmentStatus = async (req, res, next) => {
   try {
     const { status, location, notes } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Status is required'
+        }
+      });
+    }
+    
+    const normalizedStatus = normalizeShipmentStatus(status);
+    
     if (req.user?.roleId?.name === 'Driver') {
-      if (status && normalizeShipmentStatus(status) !== 'Delivered') {
+      if (normalizedStatus !== 'Delivered') {
         return res.status(403).json({
           success: false,
-          error: { code: 'PERMISSION_DENIED', message: 'Drivers can only mark Delivered' }
+          error: { 
+            code: 'PERMISSION_DENIED', 
+            message: 'Drivers can only mark Delivered' 
+          }
         });
       }
     }
@@ -384,12 +386,24 @@ const updateShipmentStatus = async (req, res, next) => {
       });
     }
     
+    // Validate status transition
+    const { isValidTransition } = require('../utils/statusNormalizer');
+    if (!isValidTransition(shipment.currentStatus, normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TRANSITION',
+          message: `Cannot transition from "${shipment.currentStatus}" to "${normalizedStatus}". Status transitions must follow the sequence and cannot skip steps.`
+        }
+      });
+    }
+    
     // Update status
-    shipment.currentStatus = status;
+    shipment.currentStatus = normalizedStatus;
     
     // Add to history
     shipment.history.push({
-      status,
+      status: normalizedStatus,
       location: location || 'N/A',
       notes: notes || '',
       date: new Date(),
@@ -397,11 +411,52 @@ const updateShipmentStatus = async (req, res, next) => {
     });
     
     await shipment.save();
-    await shipment.populate('shipperId receiverId originBranchId destinationBranchId orderId createdBy');
+    
+    // Update ALL orders in the batch (by batchNumber and departureDate)
+    const orderStatus = mapShipmentStatusToOrderStatus(normalizedStatus);
+    
+    if (shipment.batchNumber) {
+      await Order.updateMany(
+        { batchNumber: shipment.batchNumber },
+        { $set: { status: orderStatus } }
+      );
+    }
+    
+    // Also update by departureDate if available
+    if (shipment.departureDate) {
+      const dayStart = new Date(shipment.departureDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      
+      await Order.updateMany(
+        { 
+          departureDate: { $gte: dayStart, $lt: dayEnd },
+          batchNumber: shipment.batchNumber || { $exists: false }
+        },
+        { $set: { status: orderStatus } }
+      );
+    }
+    
+    // Also update direct order references
+    const orderIds = [];
+    if (shipment.orderId) orderIds.push(shipment.orderId);
+    if (Array.isArray(shipment.orderIds) && shipment.orderIds.length) {
+      orderIds.push(...shipment.orderIds);
+    }
+    
+    if (orderIds.length) {
+      await Order.updateMany(
+        { _id: { $in: orderIds } },
+        { $set: { status: orderStatus } }
+      );
+    }
+    
+    await shipment.populate('shipperId receiverId originBranchId destinationBranchId orderId orderIds createdBy');
     
     res.json({
       success: true,
-      data: { shipment },
+      data: shipment,
       message: 'Shipment status updated successfully'
     });
   } catch (error) {
@@ -573,13 +628,42 @@ const updateBatchStatus = async (req, res, next) => {
     
     await Promise.all(updatePromises);
 
-    if (allOrderIds.length && normalizedStatus) {
+    if (normalizedStatus) {
       const orderStatus = mapShipmentStatusToOrderStatus(normalizedStatus);
       if (orderStatus) {
-        await Order.updateMany(
-          { _id: { $in: allOrderIds } },
-          { $set: { status: orderStatus } }
-        );
+        // Update all orders in the batch by batchNumber
+        const batchNumber = shipments[0]?.batchNumber;
+        if (batchNumber) {
+          await Order.updateMany(
+            { batchNumber: batchNumber },
+            { $set: { status: orderStatus } }
+          );
+        }
+        
+        // Also update by departureDate if available
+        const departureDate = shipments[0]?.departureDate;
+        if (departureDate) {
+          const dayStart = new Date(departureDate);
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date(dayStart);
+          dayEnd.setDate(dayEnd.getDate() + 1);
+          
+          await Order.updateMany(
+            { 
+              departureDate: { $gte: dayStart, $lt: dayEnd },
+              batchNumber: batchNumber || { $exists: false }
+            },
+            { $set: { status: orderStatus } }
+          );
+        }
+        
+        // Update direct order references
+        if (allOrderIds.length) {
+          await Order.updateMany(
+            { _id: { $in: allOrderIds } },
+            { $set: { status: orderStatus } }
+          );
+        }
       }
     }
     
@@ -703,8 +787,9 @@ const createShipmentsFromOrders = async (req, res, next) => {
       shippingCost: firstOrder.totalAmount || 0,
       insuranceAmount: 0,
       createdBy: req.user._id,
+      currentStatus: 'Shipment Received',
       history: [{
-        status: 'Processing',
+        status: 'Shipment Received',
         location: firstOrder.branchId ? 'Origin Facility' : 'Processing Center',
         notes: `Shipment batch created for ${dateKey}`,
         date: new Date(),

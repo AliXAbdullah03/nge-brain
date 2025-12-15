@@ -41,6 +41,7 @@ const validateCustomer = [
 /**
  * Order validation
  * customerId is optional if customer details are provided
+ * orderNumber and trackingId are NOT validated - backend always auto-generates these
  */
 const validateOrder = [
   body('customerId').optional(),
@@ -56,6 +57,9 @@ const validateOrder = [
   body('lastName').optional().trim(),
   body('phone').optional().trim(),
   body('email').optional().isEmail().normalizeEmail(),
+  // orderNumber and trackingId are optional in validation - backend will auto-generate them
+  body('orderNumber').optional(),
+  body('trackingId').optional(),
   // Custom validation: if customerId is not provided, firstName, lastName, and phone are required
   body('customerId').custom((value, { req }) => {
     if (!value && (!req.body.firstName || !req.body.lastName || !req.body.phone)) {

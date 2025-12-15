@@ -88,17 +88,16 @@ const shipmentSchema = new mongoose.Schema({
   currentStatus: {
     type: String,
     enum: [
-      'Pending',
-      'Processing',
-      'Confirmed',
-      'In Transit',
+      'Shipment Received',
+      'Shipment Processing',
+      'Departed from Manila',
+      'In Transit going to Dubai Airport',
+      'Arrived at Dubai Airport',
+      'Shipment Clearance',
       'Out for Delivery',
-      'Delivered',
-      'Completed',
-      'Cancelled',
-      'On Hold'
+      'Delivered'
     ],
-    default: 'Processing'
+    default: 'Shipment Received'
   },
   originBranchId: {
     type: mongoose.Schema.Types.ObjectId,

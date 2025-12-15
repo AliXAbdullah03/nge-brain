@@ -19,30 +19,40 @@ async function generateTrackingId() {
 }
 
 /**
- * Generate unique order number: ORD- + 4 digits
+ * Generate unique order number and tracking ID: NGE + 9 digits
+ * Both orderNumber and trackingId use the same value
+ * Format: NGE followed by exactly 9 digits (e.g., NGE123456789)
  */
 async function generateOrderNumber() {
   let orderNumber;
   let exists = true;
-  let sequence = 1001;
-  
-  // Find the highest order number
-  const lastOrder = await Order.findOne().sort({ orderNumber: -1 });
-  if (lastOrder && lastOrder.orderNumber) {
-    const lastNum = parseInt(lastOrder.orderNumber.replace('ORD-', ''));
-    if (!isNaN(lastNum)) {
-      sequence = lastNum + 1;
-    }
-  }
   
   while (exists) {
-    orderNumber = `ORD-${sequence.toString().padStart(4, '0')}`;
-    const order = await Order.findOne({ orderNumber });
-    exists = !!order;
-    if (exists) sequence++;
+    // Generate 9-digit number (100000000 to 999999999)
+    const randomNum = Math.floor(100000000 + Math.random() * 900000000);
+    orderNumber = `NGE${randomNum}`;
+    
+    // Check if this orderNumber or trackingId already exists
+    const existingOrder = await Order.findOne({
+      $or: [
+        { orderNumber: orderNumber },
+        { trackingId: orderNumber }
+      ]
+    });
+    exists = !!existingOrder;
   }
   
   return orderNumber;
+}
+
+/**
+ * Generate unique tracking ID for orders: NGE + 9 digits
+ * This now returns the same value as generateOrderNumber
+ * (kept for backward compatibility, but both should use the same value)
+ */
+async function generateOrderTrackingId() {
+  // Use the same generation logic as orderNumber
+  return generateOrderNumber();
 }
 
 /**
@@ -70,6 +80,7 @@ async function generateBatchNumber() {
 module.exports = {
   generateTrackingId,
   generateOrderNumber,
+  generateOrderTrackingId,
   generateBatchNumber
 };
 

@@ -46,7 +46,7 @@ const getHubById = async (req, res, next) => {
     
     res.json({
       success: true,
-      data: { hub }
+      data: hub
     });
   } catch (error) {
     next(error);
@@ -55,24 +55,67 @@ const getHubById = async (req, res, next) => {
 
 const createHub = async (req, res, next) => {
   try {
-    const hub = new HubInformation(req.body);
+    const hubData = {
+      name: req.body.name,
+      code: req.body.code ? req.body.code.toLowerCase().trim() : undefined,
+      address: req.body.address,
+      email: req.body.email,
+      mobile: req.body.mobile,
+      operatingDays: req.body.operatingDays,
+      operatingTime: req.body.operatingTime,
+      timeZone: req.body.timeZone,
+      timeZoneOffset: req.body.timeZoneOffset,
+      mapEmbedUrl: req.body.mapEmbedUrl,
+      description: req.body.description,
+      isActive: req.body.isActive !== undefined ? req.body.isActive : true,
+      displayOrder: req.body.displayOrder || 0
+    };
+    
+    // Validate required fields
+    if (!hubData.name || !hubData.code || !hubData.address || !hubData.email || !hubData.mobile) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'name, code, address, email, and mobile are required'
+        }
+      });
+    }
+    
+    const hub = new HubInformation(hubData);
     await hub.save();
     
     res.status(201).json({
       success: true,
-      data: { hub },
+      data: hub,
       message: 'Hub created successfully'
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: 'Hub with this code already exists'
+        }
+      });
+    }
     next(error);
   }
 };
 
 const updateHub = async (req, res, next) => {
   try {
+    const updateData = { ...req.body };
+    
+    // Normalize code if provided
+    if (updateData.code) {
+      updateData.code = updateData.code.toLowerCase().trim();
+    }
+    
     const hub = await HubInformation.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       { new: true, runValidators: true }
     );
     
@@ -88,10 +131,19 @@ const updateHub = async (req, res, next) => {
     
     res.json({
       success: true,
-      data: { hub },
+      data: hub,
       message: 'Hub updated successfully'
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: 'Hub with this code already exists'
+        }
+      });
+    }
     next(error);
   }
 };

@@ -1,8 +1,9 @@
 const Order = require('../models/Order');
 const Customer = require('../models/Customer');
 const Shipment = require('../models/Shipment');
-const { generateOrderNumber } = require('../utils/generateIds');
-const { parseStatusFilter, normalizeStatus, toDatabaseStatus } = require('../utils/statusNormalizer');
+const { generateOrderNumber, generateOrderTrackingId, generateBatchNumber } = require('../utils/generateIds');
+const { parseStatusFilter, normalizeStatus, toDatabaseStatus, isValidTransition } = require('../utils/statusNormalizer');
+const { normalizePhone } = require('../utils/phoneNormalizer');
 const mongoose = require('mongoose');
 
 /**
@@ -46,6 +47,7 @@ const getOrders = async (req, res, next) => {
     if (search) {
       const searchConditions = [
         { orderNumber: { $regex: search, $options: 'i' } },
+        { trackingId: { $regex: search, $options: 'i' } },
         { notes: { $regex: search, $options: 'i' } }
       ];
       
@@ -154,16 +156,19 @@ const getOrderById = async (req, res, next) => {
 
 /**
  * Create new order
- * If customerId is provided, use it. Otherwise, check if customer exists by email/phone,
+ * If customerId is provided, use it. Otherwise, check if customer exists by phone (primary key),
  * or create a new customer if they don't exist.
+ * Auto-generates orderNumber and trackingId.
+ * Groups orders by departureDate into batches.
  */
 const createOrder = async (req, res, next) => {
   try {
     let customerId = req.body.customerId;
+    const customerData = req.body.customerData || req.body;
     
     // If customerId is not provided, check if customer exists or create new one
     if (!customerId) {
-      const { email, phone, firstName, lastName, address, city, country, postalCode } = req.body;
+      const { email, phone, firstName, lastName, address, city, country, postalCode } = customerData;
       
       if (!firstName || !lastName || !phone) {
         return res.status(400).json({
@@ -175,28 +180,35 @@ const createOrder = async (req, res, next) => {
         });
       }
       
-      // Try to find existing customer by email or phone
+      // Normalize phone number for matching
+      const normalizedPhone = normalizePhone(phone);
+      
+      // Try to find existing customer by normalized phone (primary matching key)
       let existingCustomer = null;
-      if (email) {
+      
+      // Get all customers and match by normalized phone
+      const allCustomers = await Customer.find({});
+      existingCustomer = allCustomers.find(c => {
+        const customerPhone = normalizePhone(c.phone || '');
+        return customerPhone === normalizedPhone;
+      });
+      
+      // Also try email if provided
+      if (!existingCustomer && email) {
         existingCustomer = await Customer.findOne({ 
-          $or: [
-            { email: email.toLowerCase().trim() },
-            { phone: phone.trim() }
-          ]
+          email: email.toLowerCase().trim()
         });
-      } else {
-        existingCustomer = await Customer.findOne({ phone: phone.trim() });
       }
       
       if (existingCustomer) {
         // Use existing customer
         customerId = existingCustomer._id;
       } else {
-        // Create new customer
-        const customerData = {
+        // Create new customer with normalized phone
+        const newCustomerData = {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          phone: phone.trim(),
+          phone: phone.trim(), // Store original format, but search with normalized
           email: email ? email.toLowerCase().trim() : undefined,
           address: address ? address.trim() : undefined,
           city: city ? city.trim() : undefined,
@@ -205,7 +217,7 @@ const createOrder = async (req, res, next) => {
           status: 'active'
         };
         
-        const newCustomer = new Customer(customerData);
+        const newCustomer = new Customer(newCustomerData);
         await newCustomer.save();
         customerId = newCustomer._id;
       }
@@ -223,22 +235,94 @@ const createOrder = async (req, res, next) => {
       });
     }
     
+    // Auto-generate orderNumber and trackingId (always generate, ignore if frontend sends them)
+    // The frontend should NOT send orderNumber or trackingId - backend always generates these
+    // Both orderNumber and trackingId use the same value: NGE + 9 digits
     const orderNumber = await generateOrderNumber();
+    const trackingId = orderNumber; // Same value as orderNumber
     
+    const departureDate = req.body.departureDate ? new Date(req.body.departureDate) : null;
+    
+    // Handle batch grouping by departureDate
+    let batchNumber = null;
+    let shipmentId = null;
+    
+    if (departureDate) {
+      // Find existing shipment for this departureDate
+      const dayStart = new Date(departureDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      
+      const existingShipment = await Shipment.findOne({
+        departureDate: { $gte: dayStart, $lt: dayEnd }
+      });
+      
+      if (existingShipment) {
+        batchNumber = existingShipment.batchNumber;
+        shipmentId = existingShipment._id;
+      } else {
+        // Create new batch for this departureDate
+        batchNumber = await generateBatchNumber();
+        
+        // Create new shipment for this batch
+        const newShipment = new Shipment({
+          trackingId: await require('../utils/generateIds').generateTrackingId(),
+          batchNumber,
+          departureDate: dayStart,
+          orderIds: [],
+          shipperId: customerId,
+          receiverId: customerId,
+          originBranchId: req.body.branchId || null,
+          destinationBranchId: null,
+          parcels: [],
+          totalWeight: 0,
+          weightUnit: 'kg',
+          shippingCost: req.body.totalAmount || 0,
+          insuranceAmount: 0,
+          currentStatus: 'Shipment Received',
+          createdBy: req.user._id,
+          history: [{
+            status: 'Shipment Received',
+            location: req.body.branchId ? 'Origin Facility' : 'Processing Center',
+            notes: `Shipment batch created for ${dayStart.toISOString().split('T')[0]}`,
+            date: new Date(),
+            createdBy: req.user._id
+          }]
+        });
+        
+        await newShipment.save();
+        shipmentId = newShipment._id;
+      }
+    }
+    
+    // Build order data - explicitly set orderNumber and trackingId (ignore any from req.body)
     const orderData = {
-      orderNumber,
+      orderNumber, // Always auto-generated
+      trackingId,  // Always auto-generated
       customerId: customerId,
       branchId: req.body.branchId || null,
       items: req.body.items,
       totalAmount: req.body.totalAmount,
       currency: req.body.currency || 'USD',
-      departureDate: req.body.departureDate,
+      departureDate: departureDate,
+      batchNumber: batchNumber,
+      shipmentId: shipmentId,
+      status: 'Shipment Received',
       notes: req.body.notes,
       createdBy: req.user._id
     };
     
     const order = new Order(orderData);
     await order.save();
+    
+    // Add order to shipment if batch exists
+    if (shipmentId) {
+      await Shipment.findByIdAndUpdate(
+        shipmentId,
+        { $addToSet: { orderIds: order._id } }
+      );
+    }
     
     await order.populate('customerId', 'firstName lastName email phone');
     await order.populate('branchId', 'name');
@@ -312,7 +396,7 @@ const updateOrderStatus = async (req, res, next) => {
         success: false,
         error: {
           code: 'INVALID_STATUS',
-          message: `Invalid status value: ${status}. Valid values: pending, processing, confirmed, in_transit, out_for_delivery, delivered, completed, cancelled`
+          message: `Invalid status value: ${status}. Valid values: Shipment Received, Shipment Processing, Departed from Manila, In Transit going to Dubai Airport, Arrived at Dubai Airport, Shipment Clearance, Out for Delivery, Delivered`
         }
       });
     }
@@ -333,41 +417,27 @@ const updateOrderStatus = async (req, res, next) => {
     // Role-based validation for drivers
     const userRole = user?.roleId?.name || user?.role;
     if (userRole === 'Driver') {
-      const driverAllowedStatuses = ['out_for_delivery', 'delivered'];
+      const driverAllowedStatuses = ['Out for Delivery', 'Delivered'];
       if (!driverAllowedStatuses.includes(dbStatus)) {
         return res.status(403).json({
           success: false,
           error: {
             code: 'PERMISSION_DENIED',
-            message: 'Drivers can only update orders to "out_for_delivery" or "delivered"'
+            message: 'Drivers can only update orders to "Out for Delivery" or "Delivered"'
           }
         });
       }
     }
     
-    // Optional: Status transition validation
-    const currentStatusNormalized = normalizeStatus(order.status || 'pending');
-    const currentDbStatus = toDatabaseStatus(currentStatusNormalized) || 'pending';
+    // Status transition validation (can't skip steps)
+    const currentStatus = order.status || 'Shipment Received';
     
-    // Define valid status transitions
-    const validTransitions = {
-      'pending': ['processing', 'confirmed', 'cancelled'],
-      'processing': ['confirmed', 'in_transit', 'cancelled'],
-      'confirmed': ['in_transit', 'cancelled'],
-      'in_transit': ['out_for_delivery', 'delivered'],
-      'out_for_delivery': ['delivered'],
-      'delivered': ['completed'],
-      'completed': [], // Terminal state
-      'cancelled': [] // Terminal state
-    };
-    
-    const allowedNextStatuses = validTransitions[currentDbStatus] || [];
-    if (allowedNextStatuses.length > 0 && !allowedNextStatuses.includes(dbStatus)) {
+    if (!isValidTransition(currentStatus, dbStatus)) {
       return res.status(400).json({
         success: false,
         error: {
           code: 'INVALID_TRANSITION',
-          message: `Cannot transition from "${currentDbStatus}" to "${dbStatus}". Allowed transitions: ${allowedNextStatuses.join(', ') || 'none (terminal state)'}`
+          message: `Cannot transition from "${currentStatus}" to "${dbStatus}". Status transitions must follow the sequence and cannot skip steps.`
         }
       });
     }
@@ -375,8 +445,11 @@ const updateOrderStatus = async (req, res, next) => {
     // Store old status for logging
     const oldStatus = order.status;
     
-    // Update order status in memory
+    // Update order status and notes if provided
     order.status = dbStatus;
+    if (req.body.notes !== undefined) {
+      order.notes = req.body.notes;
+    }
     order.updatedAt = new Date();
     
     // CRITICAL: Save to database
@@ -504,9 +577,14 @@ const trackOrderOrShipment = async (req, res, next) => {
       }
     }
     
-    // If not found by ID, try as orderNumber
+    // If not found by ID, try as orderNumber or trackingId (they're the same now)
     if (!order) {
-      order = await Order.findOne({ orderNumber: trimmedIdentifier.toUpperCase() })
+      order = await Order.findOne({
+        $or: [
+          { orderNumber: trimmedIdentifier.toUpperCase() },
+          { trackingId: trimmedIdentifier.toUpperCase() }
+        ]
+      })
         .populate('customerId', 'firstName lastName email phone address city country')
         .populate('branchId', 'name address city country')
         .lean();

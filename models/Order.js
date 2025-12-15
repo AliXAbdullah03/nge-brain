@@ -22,7 +22,15 @@ const orderSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    trim: true
+    trim: true,
+    match: [/^NGE\d{9}$/, 'Order number must be in format NGE followed by 9 digits (e.g., NGE123456789)']
+  },
+  trackingId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    match: [/^NGE\d{9}$/, 'Tracking ID must be in format NGE followed by 9 digits (e.g., NGE123456789)']
   },
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -58,8 +66,17 @@ const orderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'confirmed', 'in_transit', 'out_for_delivery', 'delivered', 'completed', 'cancelled'],
-    default: 'pending'
+    enum: [
+      'Shipment Received',
+      'Shipment Processing',
+      'Departed from Manila',
+      'In Transit going to Dubai Airport',
+      'Arrived at Dubai Airport',
+      'Shipment Clearance',
+      'Out for Delivery',
+      'Delivered'
+    ],
+    default: 'Shipment Received'
   },
   paymentStatus: {
     type: String,
@@ -79,8 +96,11 @@ const orderSchema = new mongoose.Schema({
 
 // Indexes
 orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ trackingId: 1 });
 orderSchema.index({ customerId: 1 });
 orderSchema.index({ status: 1 });
+orderSchema.index({ batchNumber: 1 });
+orderSchema.index({ departureDate: 1 });
 orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);
