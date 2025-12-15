@@ -29,21 +29,41 @@ const PORT = process.env.PORT || 3000;
 // Connect to database
 connectDB();
 
-// Security middleware
-app.use(helmet());
+// Security middleware - configure helmet to allow CORS
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false
+}));
 
 // CORS configuration
-app.use(cors({
-  origin: [
-    'https://ngebase.vercel.app',  // Your Vercel frontend
-    'http://localhost:3000',        // Local development (optional)
-    'http://localhost:3001',        // Local development (optional)
-    ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [])
-  ],
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'https://nextglobalexpress.com',
+      'https://www.nextglobalexpress.com',
+      'https://ngebase.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [])
+    ];
+    
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
 
 // Body parser middleware (must be before logger to parse body)
 app.use(express.json());
@@ -55,10 +75,11 @@ app.use(logger);
 // Serve static files (uploaded images)
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
-// General API rate limiting
+// General API rate limiting (skip OPTIONS requests for CORS preflight)
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 100, // 100 requests per minute
+  skip: (req) => req.method === 'OPTIONS', // Skip rate limiting for preflight requests
   message: {
     success: false,
     error: {
